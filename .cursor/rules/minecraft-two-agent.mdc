@@ -1,0 +1,26 @@
+---
+description: Two-agent Minecraft server management architecture and conventions
+alwaysApply: true
+---
+
+# Minecraft two-agent management system
+
+Read `MEMORY.md` for full project memory when resuming work.
+
+## Flow (do not change without updating MEMORY.md)
+
+User request → **Orchestrator** (`orchestrator.py`, plain code, no LLM) → **Plugin Manager** → `change_record` → **Verifier** → success or rollback+restart.
+
+## Hard constraints
+
+- Orchestrator is deterministic Python — never introduce an LLM router.
+- Plugin Manager and Verifier keep **separate** system prompts, tools, and message histories.
+- Plugin installs must go through the allowlist (`config.PLUGIN_ALLOWLIST` / `search_plugin_repo`).
+- Verifier has no write tools except `rollback_last_change`.
+- Tool **bodies** run in Python (stubs in `tools/stub_state.py` today); the model only chooses tools/args.
+- Prefer swapping stub implementations for real RCON/subprocess later without changing agent contracts.
+
+## Contracts
+
+- `ChangeRecord`: `{action, target, backup_path, timestamp, details?}`
+- `VerifyResult`: `{healthy, reason}`

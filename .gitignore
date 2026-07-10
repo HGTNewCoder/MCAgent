@@ -181,3 +181,9 @@ cython_debug/
 .cursorindexingignore
 adcs-minecraft.key
 adcs-minecraft.pub
+
+# Stub Minecraft server state (local mock)
+mock_server/
+
+# Per-run agent output logs
+logs/
