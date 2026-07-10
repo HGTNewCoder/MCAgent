@@ -50,12 +50,19 @@ class Orchestrator:
         # Unhealthy → rollback + restart, then report
         print("[Orchestrator] 3/4 unhealthy — rolling back…")
         rolled_back = False
+        rollback_note = "No backup available to roll back."
         if change.backup_path:
             rb = self.verifier.rollback(change.backup_path)
             rolled_back = bool(rb.get("ok"))
-            # Explicit restart after rollback (rollback stub already restarts;
-            # keep an extra restart for the real-tool path later).
-            stub_state.restart_server()
+            if rolled_back:
+                # Explicit restart after rollback (rollback stub already restarts;
+                # keep an extra restart for the real-tool path later).
+                stub_state.restart_server()
+                rollback_note = "Rolled back and restarted."
+            else:
+                err = rb.get("error") or rb
+                print(f"[Orchestrator] rollback failed: {err}")
+                rollback_note = f"Rollback failed: {err}."
         else:
             print("[Orchestrator] no backup_path; skipping rollback")
 
@@ -63,7 +70,7 @@ class Orchestrator:
         message = (
             f"Failure after change ({change.action} {change.target}). "
             f"Reason: {verify.reason}. "
-            f"{'Rolled back and restarted.' if rolled_back else 'No backup available to roll back.'}"
+            f"{rollback_note}"
         )
         return OrchestratorResult(
             success=False,

@@ -51,13 +51,15 @@ class VerifierAgent:
         return _parse_verify_result(raw)
 
     def rollback(self, backup_path: str) -> dict[str, Any]:
-        """Orchestrator-driven rollback: call the rollback tool via a short agent turn."""
-        self._agent.reset_history()
-        raw = self._agent.run(
-            "The server is unhealthy. Call rollback_last_change exactly once with "
-            f'backup_path="{backup_path}", then briefly confirm what you did in plain text.'
-        )
-        return {"ok": True, "agent_message": raw}
+        """Orchestrator-driven rollback: invoke the tool directly and return its result.
+
+        Goes through the tool registry (not an LLM turn) so ``ok`` reflects the real
+        outcome — e.g. missing backup_path yields ``ok: False``, not a false success.
+        """
+        fn = VERIFIER_TOOLS["rollback_last_change"]
+        result = fn(backup_path=backup_path)
+        print(f"[Verifier] rollback_last_change → {result}")
+        return result
 
 
 def _parse_verify_result(raw: str) -> VerifyResult:
