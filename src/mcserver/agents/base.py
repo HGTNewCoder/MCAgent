@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-import config
+from mcserver import config
 
 ToolFn = Callable[..., dict[str, Any]]
 

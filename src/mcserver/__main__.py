@@ -1,4 +1,4 @@
-"""Backward-compatible CLI shim — prefer ``uv run mcserver`` or ``python -m mcserver``."""
+"""Allow ``python -m mcserver``."""
 
 from mcserver.cli.main import main
 

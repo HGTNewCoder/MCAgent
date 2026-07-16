@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import config
+from mcserver import config
 
 
 def ensure_mock_layout() -> None:

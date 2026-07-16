@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 
 Action = Literal["install", "uninstall", "configure", "noop"]
+RunMode = Literal["info", "change"]
 
 
 @dataclass
@@ -62,20 +63,43 @@ class VerifyResult:
 
 
 @dataclass
+class PluginManagerResult:
+    """Plugin Manager agent output: structured change + full text reply."""
+
+    change_record: ChangeRecord
+    raw_response: str
+    user_reply: str
+
+
+@dataclass
+class VerifierRunResult:
+    """Verifier agent output: structured verdict + full text reply."""
+
+    verify_result: VerifyResult
+    raw_response: str
+
+
+@dataclass
 class OrchestratorResult:
     """Final report returned to the user by the plain-code orchestrator."""
 
     success: bool
     message: str
+    mode: RunMode
     change_record: ChangeRecord | None
     verify_result: VerifyResult | None
+    plugin_manager_reply: str = ""
+    verifier_reply: str = ""
     rolled_back: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "message": self.message,
+            "mode": self.mode,
             "change_record": self.change_record.to_dict() if self.change_record else None,
             "verify_result": self.verify_result.to_dict() if self.verify_result else None,
+            "plugin_manager_reply": self.plugin_manager_reply,
+            "verifier_reply": self.verifier_reply,
             "rolled_back": self.rolled_back,
         }

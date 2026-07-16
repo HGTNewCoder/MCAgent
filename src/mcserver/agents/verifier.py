@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
-from agents.base import ToolCallingAgent
-from models import ChangeRecord, VerifyResult
-from tools.verifier_tools import VERIFIER_TOOLS, get_verifier_tool_schemas
+from mcserver.agents.base import ToolCallingAgent
+from mcserver.agents.parsing import extract_json_object
+from mcserver.models import ChangeRecord, VerifierRunResult, VerifyResult
+from mcserver.tools.registry.verifier import VERIFIER_TOOLS, get_verifier_tool_schemas
 
 SYSTEM_PROMPT = """\
 You are the Verifier for a Minecraft server. You do NOT share context with the Plugin Manager.
@@ -40,7 +40,7 @@ class VerifierAgent:
             tool_schemas=get_verifier_tool_schemas(),
         )
 
-    def verify(self, change_record: ChangeRecord) -> VerifyResult:
+    def verify(self, change_record: ChangeRecord) -> VerifierRunResult:
         self._agent.reset_history()
         payload = json.dumps(change_record.to_dict(), indent=2)
         raw = self._agent.run(
@@ -48,14 +48,13 @@ class VerifierAgent:
             "Do NOT roll back in this pass — only report healthy/reason.\n\n"
             f"change_record:\n{payload}"
         )
-        return _parse_verify_result(raw)
+        return VerifierRunResult(
+            verify_result=_parse_verify_result(raw),
+            raw_response=raw,
+        )
 
     def rollback(self, backup_path: str) -> dict[str, Any]:
-        """Orchestrator-driven rollback: invoke the tool directly and return its result.
-
-        Goes through the tool registry (not an LLM turn) so ``ok`` reflects the real
-        outcome — e.g. missing backup_path yields ``ok: False``, not a false success.
-        """
+        """Orchestrator-driven rollback: invoke the tool directly and return its result."""
         fn = VERIFIER_TOOLS["rollback_last_change"]
         result = fn(backup_path=backup_path)
         print(f"[Verifier] rollback_last_change → {result}")
@@ -63,7 +62,7 @@ class VerifierAgent:
 
 
 def _parse_verify_result(raw: str) -> VerifyResult:
-    data = _extract_json_object(raw)
+    data = extract_json_object(raw)
     if not data:
         return VerifyResult(
             healthy=False,
@@ -73,24 +72,3 @@ def _parse_verify_result(raw: str) -> VerifyResult:
         healthy=bool(data.get("healthy", False)),
         reason=str(data.get("reason", "")),
     )
-
-
-def _extract_json_object(text: str) -> dict[str, Any] | None:
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", text)
-    if not match:
-        return None
-    try:
-        obj = json.loads(match.group(0))
-        return obj if isinstance(obj, dict) else None
-    except json.JSONDecodeError:
-        return None

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO, Callable
 
-import config
+from mcserver import config
 
 
 class _TeeStream:

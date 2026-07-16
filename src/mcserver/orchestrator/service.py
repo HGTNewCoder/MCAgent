@@ -1,17 +1,19 @@
 """Deterministic orchestrator — plain code, not an LLM router.
 
 Flow:
-  user request → Plugin Manager → change_record → Verifier →
-    healthy  → success report
-    unhealthy → rollback + restart → failure report
+  user request → Plugin Manager → change_record →
+    info request → report answer (skip Verifier)
+    change request → Verifier → healthy / rollback
 """
 
 from __future__ import annotations
 
-from agents.plugin_manager import PluginManagerAgent
-from agents.verifier import VerifierAgent
-from models import OrchestratorResult
-from tools import stub_state
+from mcserver.agents.plugin_manager import PluginManagerAgent
+from mcserver.agents.verifier import VerifierAgent
+from mcserver.models import OrchestratorResult
+from mcserver.orchestrator.routing import is_info_request
+from mcserver.tools import stub_state
+from mcserver.tools.catalog import format_tool_catalog
 
 
 class Orchestrator:
@@ -25,13 +27,29 @@ class Orchestrator:
         self.verifier = verifier or VerifierAgent()
 
     def handle(self, user_request: str) -> OrchestratorResult:
-        print("[Orchestrator] 1/4 Plugin Manager…")
-        change = self.plugin_manager.handle(user_request)
-        print(f"[Orchestrator] change_record={change.to_dict()}")
+        info_mode = is_info_request(user_request)
 
-        print("[Orchestrator] 2/4 Verifier…")
-        verify = self.verifier.verify(change)
-        print(f"[Orchestrator] verify={verify.to_dict()}")
+        print("[Orchestrator] Plugin Manager…")
+        pm = self.plugin_manager.handle(user_request)
+        change = pm.change_record
+
+        if info_mode:
+            print("[Orchestrator] info mode — skipping Verifier")
+            reply = pm.user_reply.strip()
+            if not reply or len(reply) < 40:
+                reply = format_tool_catalog()
+            return OrchestratorResult(
+                success=True,
+                message=reply,
+                mode="info",
+                change_record=change,
+                verify_result=None,
+                rolled_back=False,
+            )
+
+        print("[Orchestrator] Verifier…")
+        vr = self.verifier.verify(change)
+        verify = vr.verify_result
 
         if verify.healthy:
             summary = (
@@ -42,21 +60,20 @@ class Orchestrator:
             return OrchestratorResult(
                 success=True,
                 message=summary,
+                mode="change",
                 change_record=change,
                 verify_result=verify,
+                plugin_manager_reply=pm.user_reply,
                 rolled_back=False,
             )
 
-        # Unhealthy → rollback + restart, then report
-        print("[Orchestrator] 3/4 unhealthy — rolling back…")
+        print("[Orchestrator] unhealthy — rolling back…")
         rolled_back = False
         rollback_note = "No backup available to roll back."
         if change.backup_path:
             rb = self.verifier.rollback(change.backup_path)
             rolled_back = bool(rb.get("ok"))
             if rolled_back:
-                # Explicit restart after rollback (rollback stub already restarts;
-                # keep an extra restart for the real-tool path later).
                 stub_state.restart_server()
                 rollback_note = "Rolled back and restarted."
             else:
@@ -66,7 +83,6 @@ class Orchestrator:
         else:
             print("[Orchestrator] no backup_path; skipping rollback")
 
-        print("[Orchestrator] 4/4 reporting failure")
         message = (
             f"Failure after change ({change.action} {change.target}). "
             f"Reason: {verify.reason}. "
@@ -75,7 +91,9 @@ class Orchestrator:
         return OrchestratorResult(
             success=False,
             message=message,
+            mode="change",
             change_record=change,
             verify_result=verify,
+            plugin_manager_reply=pm.user_reply,
             rolled_back=rolled_back,
         )

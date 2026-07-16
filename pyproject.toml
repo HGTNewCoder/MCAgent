@@ -1,16 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "minecraft-server"
+name = "mcserver"
 version = "0.1.0"
 description = "Two-agent Minecraft server management (DeepSeek Plugin Manager + Verifier)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "ddgs>=9.14.4",
-    "smolagents",
     "openai",
     "python-dotenv>=1.2.2",
 ]
 
+[project.scripts]
+mcserver = "mcserver.cli.main:main"
+mcserver-gui = "mcserver.cli.gui:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcserver"]
+
+[tool.uv]
+package = true
+
 [tool.basedpyright]
 venvPath = "."
 venv = ".venv"
+extraPaths = ["src"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from tools import stub_state
+from mcserver.tools.stub import state as stub_state
 
 ToolFn = Callable[..., dict[str, Any]]
 
