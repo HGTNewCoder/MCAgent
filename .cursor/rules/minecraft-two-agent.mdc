@@ -5,20 +5,25 @@ alwaysApply: true
 
 # Minecraft two-agent management system
 
-Read `MEMORY.md` for full project memory when resuming work.
+Read `MEMORY.md` and `docs/ARCHITECTURE.md` when resuming work.
 
-## Flow (do not change without updating MEMORY.md)
+## Flow
 
-User request → **Orchestrator** (`orchestrator.py`, plain code, no LLM) → **Plugin Manager** → `change_record` → **Verifier** → success or rollback+restart.
+User request → **Orchestrator** (`src/mcserver/orchestrator/service.py`, plain code) → Plugin Manager → `change_record` → Verifier (skip for info mode) → success or rollback.
 
 ## Hard constraints
 
 - Orchestrator is deterministic Python — never introduce an LLM router.
 - Plugin Manager and Verifier keep **separate** system prompts, tools, and message histories.
-- Plugin installs must go through the allowlist (`config.PLUGIN_ALLOWLIST` / `search_plugin_repo`).
+- Plugin installs search Hangar/Modrinth/SpigotMC and download jars; blocklist-only guardrail in prototype (`config.PLUGIN_BLOCKLIST`).
 - Verifier has no write tools except `rollback_last_change`.
-- Tool **bodies** run in Python (stubs in `tools/stub_state.py` today); the model only chooses tools/args.
-- Prefer swapping stub implementations for real RCON/subprocess later without changing agent contracts.
+- Tool bodies live under `src/mcserver/tools/` (`stub/` orchestration, `plugins/` catalog, `process/` Java control).
+- Application code lives in `src/mcserver/` — not repo root.
+
+## Environment
+
+- Runtime config lives in **`.env`** (loaded by `config.py`). When adding or changing env vars, **update `.env`** — not `.env.example` — unless you are only documenting a new variable for future clones.
+- Never commit `.env` or copy secrets into `.env.example`.
 
 ## Contracts
 
