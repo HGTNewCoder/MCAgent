@@ -15,6 +15,12 @@ from typing import Any
 from mcserver import config
 
 
+def _using_real_log() -> bool:
+    from mcserver.tools.process import manager as process
+
+    return process.use_real_process()
+
+
 def ensure_mock_layout() -> None:
     """Create mock server directories and a starter log if missing."""
     config.PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,8 +40,9 @@ def ensure_mock_layout() -> None:
             "force_unhealthy": False,
         }
         _write_state(initial)
-        _write_log_lines(initial["log_lines"])
-    elif not config.SERVER_LOG.exists():
+        if not _using_real_log():
+            _write_log_lines(initial["log_lines"])
+    elif not config.SERVER_LOG.exists() and not _using_real_log():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         _write_log_lines(state.get("log_lines", []))
 
@@ -70,7 +77,8 @@ def _append_log(line: str) -> None:
     entry = f"[{stamp}] {line}"
     state.setdefault("log_lines", []).append(entry)
     _write_state(state)
-    _write_log_lines(state["log_lines"])
+    if not _using_real_log():
+        _write_log_lines(state["log_lines"])
 
 
 def set_force_unhealthy(value: bool) -> None:
@@ -80,18 +88,30 @@ def set_force_unhealthy(value: bool) -> None:
     _write_state(state)
 
 
+def list_plugins_info() -> dict[str, Any]:
+    """Installed plugin summary for the web API."""
+    ensure_mock_layout()
+    state = _read_state()
+    loaded = list(state.get("loaded_plugins", []))
+    jars: list[str] = []
+    if config.PLUGINS_DIR.is_dir():
+        jars = sorted(p.stem for p in config.PLUGINS_DIR.glob("*.jar") if p.is_file())
+    return {
+        "ok": True,
+        "allowed_sources": sorted(config.PLUGIN_ALLOWED_SOURCES),
+        "blocklist": sorted(config.PLUGIN_BLOCKLIST),
+        "loaded": loaded,
+        "jars": jars,
+    }
+
+
 # --- Plugin Manager stubs -------------------------------------------------
 
 
 def search_plugin_repo(query: str) -> dict[str, Any]:
-    q = query.strip().lower()
-    matches = [name for name in sorted(config.PLUGIN_ALLOWLIST) if q in name.lower()]
-    return {
-        "ok": True,
-        "query": query,
-        "matches": matches,
-        "note": "Only allowlisted plugins are returned.",
-    }
+    from mcserver.tools.plugins.resolver import search_all
+
+    return search_all(query)
 
 
 def backup_plugins_dir() -> dict[str, Any]:
@@ -119,23 +139,59 @@ def backup_plugins_dir() -> dict[str, Any]:
     return {"ok": True, "backup_path": str(backup_path)}
 
 
-def install_plugin(name: str) -> dict[str, Any]:
-    if name not in config.PLUGIN_ALLOWLIST:
-        return {
-            "ok": False,
-            "error": f"Plugin '{name}' is not on the allowlist. Refusing install.",
-            "allowlist": sorted(config.PLUGIN_ALLOWLIST),
-        }
+def install_plugin(install_key: str) -> dict[str, Any]:
+    from mcserver.tools.plugins import download as plugin_download
+    from mcserver.tools.plugins.resolver import resolve_install_key, stub_candidate_from_key
+    from mcserver.tools.process import manager as process
+
+    ensure_mock_layout()
+
+    if process.use_real_process():
+        candidate, err = resolve_install_key(install_key)
+        if err or candidate is None:
+            return {"ok": False, "error": err or "Could not resolve plugin", "install_key": install_key}
+
+        cached, dl_err = plugin_download.download_to_cache(candidate)
+        if dl_err or cached is None:
+            return {
+                "ok": False,
+                "error": dl_err or "Download failed",
+                "install_key": install_key,
+                "plugin": candidate.name,
+            }
+
+        dest = plugin_download.install_from_cache(candidate, cached)
+        note = f"Downloaded from {candidate.source}"
+        if candidate.warning:
+            note = f"{note} ({candidate.warning})"
+    else:
+        candidate, err = stub_candidate_from_key(install_key)
+        if err or candidate is None:
+            return {"ok": False, "error": err or "Invalid install_key", "install_key": install_key}
+
+        dest = config.PLUGINS_DIR / f"{plugin_download._safe_jar_stem(candidate.name)}.jar"
+        dest.write_text(f"stub-jar:{candidate.name}\n", encoding="utf-8")
+        cached = None
+        note = "stub"
 
     state = _read_state()
-    jar = config.PLUGINS_DIR / f"{name}.jar"
-    jar.write_text(f"stub-jar:{name}\n", encoding="utf-8")
     loaded = set(state.get("loaded_plugins", []))
-    loaded.add(name)
+    loaded.add(candidate.name)
     state["loaded_plugins"] = sorted(loaded)
     _write_state(state)
-    _append_log(f"[STUB] Installed plugin {name}")
-    return {"ok": True, "plugin": name, "path": str(jar)}
+    _append_log(f"[INSTALL] Installed plugin {candidate.name} ({note})")
+    return {
+        "ok": True,
+        "plugin": candidate.name,
+        "install_key": install_key,
+        "path": str(dest),
+        "source": candidate.source,
+        "version": candidate.version,
+        "bytes": dest.stat().st_size,
+        "note": note,
+        "warning": candidate.warning or None,
+        "cache_path": str(cached) if cached else None,
+    }
 
 
 def uninstall_plugin(name: str) -> dict[str, Any]:
@@ -153,7 +209,7 @@ def uninstall_plugin(name: str) -> dict[str, Any]:
 
 def configure_plugin(name: str, key: str, value: str) -> dict[str, Any]:
     state = _read_state()
-    if name not in state.get("loaded_plugins", []) and name not in config.PLUGIN_ALLOWLIST:
+    if name not in state.get("loaded_plugins", []):
         return {"ok": False, "error": f"Unknown plugin '{name}'."}
     configs = state.setdefault("plugin_configs", {})
     plugin_cfg = configs.setdefault(name, {})
@@ -163,7 +219,59 @@ def configure_plugin(name: str, key: str, value: str) -> dict[str, Any]:
     return {"ok": True, "plugin": name, "key": key, "value": value}
 
 
+def start_server() -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
+    if process.use_real_process():
+        result = process.start_server()
+        if result.get("ok"):
+            state = _read_state()
+            state["process_alive"] = True
+            _write_state(state)
+            _append_log(f"[PROCESS] Started server pid={result.get('pid')}")
+        return result
+
+    state = _read_state()
+    state["process_alive"] = True
+    _write_state(state)
+    _append_log("[STUB] Server started")
+    return {"ok": True, "already_running": False, "pid": None, "note": "stub"}
+
+
+def stop_server() -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
+    if process.use_real_process():
+        result = process.stop_server()
+        if result.get("ok"):
+            state = _read_state()
+            state["process_alive"] = False
+            _write_state(state)
+            _append_log("[PROCESS] Stopped server")
+        return result
+
+    state = _read_state()
+    state["process_alive"] = False
+    _write_state(state)
+    _append_log("[STUB] Server stopped")
+    return {"ok": True, "already_stopped": False, "pid": None, "note": "stub"}
+
+
 def restart_server() -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
+    if process.use_real_process():
+        result = process.restart_server()
+        state = _read_state()
+        state["process_alive"] = bool(result.get("ok"))
+        if state.get("force_unhealthy"):
+            state["process_alive"] = False
+            _append_log("[FATAL] Simulated fatal error after restart")
+        elif result.get("ok"):
+            _append_log(f"[PROCESS] Restarted server pid={result.get('start', {}).get('pid')}")
+        _write_state(state)
+        return result
+
     state = _read_state()
     state["process_alive"] = True
     if state.get("force_unhealthy"):
@@ -176,7 +284,7 @@ def restart_server() -> dict[str, Any]:
     return {
         "ok": True,
         "process_alive": state["process_alive"],
-        "note": "Stub restart — replace with real process manager later.",
+        "note": "stub",
     }
 
 
@@ -184,20 +292,49 @@ def restart_server() -> dict[str, Any]:
 
 
 def read_server_log(lines: int = 50) -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
     ensure_mock_layout()
-    _flush_log_from_state()
-    content = config.SERVER_LOG.read_text(encoding="utf-8").splitlines()
+    if not process.use_real_process():
+        _flush_log_from_state()
+    if not config.SERVER_LOG.exists():
+        return {"ok": True, "lines": []}
+    content = config.SERVER_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
     n = max(1, int(lines))
     return {"ok": True, "lines": content[-n:]}
 
 
 def check_process_alive() -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
+    if process.use_real_process():
+        result = process.check_process_alive()
+        state = _read_state()
+        if state.get("force_unhealthy"):
+            result = {**result, "alive": False, "forced_unhealthy": True}
+        return result
+
     state = _read_state()
-    alive = bool(state.get("process_alive", False)) and not state.get("force_unhealthy", False)
-    return {"ok": True, "alive": alive}
+    alive = bool(state.get("process_alive", False)) and not state.get(
+        "force_unhealthy", False
+    )
+    return {"ok": True, "alive": alive, "pid": None}
 
 
 def check_plugin_loaded(name: str) -> dict[str, Any]:
+    from mcserver.tools.process import manager as process
+
+    if process.use_real_process():
+        loaded = False
+        if config.SERVER_LOG.exists():
+            log = config.SERVER_LOG.read_text(encoding="utf-8", errors="replace").lower()
+            name_lower = name.lower()
+            loaded = f"enabling {name_lower}" in log or f"enabled {name_lower}" in log
+        state = _read_state()
+        if state.get("force_unhealthy"):
+            loaded = False
+        return {"ok": True, "plugin": name, "loaded": loaded}
+
     state = _read_state()
     loaded = name in state.get("loaded_plugins", [])
     if state.get("force_unhealthy"):
@@ -205,17 +342,57 @@ def check_plugin_loaded(name: str) -> dict[str, Any]:
     return {"ok": True, "plugin": name, "loaded": loaded}
 
 
+def _log_health_issues(log: str) -> dict[str, Any]:
+    """Detect log lines that should fail a smoke test."""
+    upper = log.upper()
+    patterns = ("FATAL", "ERROR", "SEVERE", "EXCEPTION", "FAILED TO LOAD")
+    matched = [pattern for pattern in patterns if pattern in upper]
+    return {
+        "unhealthy": bool(matched),
+        "fatal_seen": "FATAL" in matched,
+        "error_seen": any(pattern != "FATAL" for pattern in matched),
+        "matched_patterns": matched,
+    }
+
+
 def run_smoke_test() -> dict[str, Any]:
-    """Stub: server boots and no fatal error within N seconds."""
+    """Server boots and log stays free of fatal/error signals."""
+    from mcserver.tools.process import manager as process
+
     state = _read_state()
+    if process.use_real_process():
+        alive_info = process.check_process_alive()
+        alive = bool(alive_info.get("alive"))
+        log_path = config.SERVER_LOG
+        log = ""
+        if log_path.exists():
+            log = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-30:])
+        issues = _log_health_issues(log)
+        unhealthy = issues["unhealthy"] or state.get("force_unhealthy", False)
+        if state.get("force_unhealthy"):
+            alive = False
+        return {
+            "ok": True,
+            "passed": alive and not unhealthy,
+            "seconds": config.SMOKE_TEST_SECONDS,
+            "fatal_seen": issues["fatal_seen"] or state.get("force_unhealthy", False),
+            "error_seen": issues["error_seen"],
+            "matched_patterns": issues["matched_patterns"],
+            "process_alive": alive,
+            "pid": alive_info.get("pid"),
+        }
+
     log = "\n".join(state.get("log_lines", [])[-30:])
-    fatal = "FATAL" in log.upper() or state.get("force_unhealthy", False)
-    alive = bool(state.get("process_alive", False)) and not fatal
+    issues = _log_health_issues(log)
+    unhealthy = issues["unhealthy"] or state.get("force_unhealthy", False)
+    alive = bool(state.get("process_alive", False)) and not unhealthy
     return {
         "ok": True,
-        "passed": alive and not fatal,
+        "passed": alive and not unhealthy,
         "seconds": config.SMOKE_TEST_SECONDS,
-        "fatal_seen": fatal,
+        "fatal_seen": issues["fatal_seen"] or state.get("force_unhealthy", False),
+        "error_seen": issues["error_seen"],
+        "matched_patterns": issues["matched_patterns"],
         "process_alive": alive,
     }
 

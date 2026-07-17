@@ -11,11 +11,14 @@ requires-python = ">=3.13"
 dependencies = [
     "openai",
     "python-dotenv>=1.2.2",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [project.scripts]
 mcserver = "mcserver.cli.main:main"
 mcserver-gui = "mcserver.cli.gui:main"
+mcserver-api = "mcserver.api.main:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
@@ -25,6 +28,11 @@ packages = ["src/mcserver"]
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires ./server/server.jar and Java; modifies plugins and restarts the server",
+]
 
 [tool.basedpyright]
 venvPath = "."

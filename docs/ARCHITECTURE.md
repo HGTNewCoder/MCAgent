@@ -10,15 +10,19 @@ minecraft-server/
 ├── README.md
 ├── MEMORY.md               # project memory for AI / future you
 ├── main.py / gui.py        # thin shims (backward compatible)
+├── web/                    # React + Vite + TypeScript + Tailwind demo UI
 ├── src/
 │   └── mcserver/           # ← all application code lives here
-│       ├── config.py       # env vars, paths, allowlist
+│       ├── config.py       # env vars, paths, plugin catalog settings
 │       ├── models.py       # ChangeRecord, VerifyResult, etc.
 │       ├── agents/         # LLM layer (prompts + tool-calling loop)
 │       ├── orchestrator/   # deterministic workflow (plain Python)
+│       ├── api/            # FastAPI HTTP bridge (SSE logs, server/plugins)
 │       ├── tools/
 │       │   ├── registry/   # JSON schemas + name→function maps
-│       │   ├── stub/       # mock implementations (swap for real RCON)
+│       │   ├── process/    # real Java start/stop/restart
+│       │   ├── plugins/    # Hangar / Modrinth / Spigot search + download
+│       │   ├── stub/       # mock plugin FS + delegates process when jar exists
 │       │   └── catalog.py  # static tool list fallback
 │       └── cli/            # user-facing entrypoints (terminal, GUI, logging)
 ├── tests/
@@ -41,7 +45,7 @@ minecraft-server/
 
 | Layer | Folder | Role |
 |-------|--------|------|
-| **Entry** | `cli/` | How users start the app (terminal, GUI, log files) |
+| **Entry** | `cli/`, `api/`, `web/` | How users start the app (terminal, Tkinter, HTTP + React) |
 | **Workflow** | `orchestrator/` | Fixed pipeline: route → verify → rollback |
 | **Intelligence** | `agents/` | LLM prompts and tool-calling loops |
 | **Actions** | `tools/` | What actually touches the server (stub or real) |
@@ -67,17 +71,31 @@ Tests import the installed package (`from mcserver...`), same as production code
 | Path | Purpose |
 |------|---------|
 | `mock_server/` | Fake server state while developing |
-| `logs/` | Session logs from GUI/CLI |
+| `logs/` | Session logs from GUI/CLI/API |
 | `.env` | Secrets (never committed) |
 
 Code in `src/`; generated/local data outside it.
+
+### 6. **Web UI** — React SPA over FastAPI
+
+The browser never talks to agents directly. `web/` calls `api/`; `api/` calls `Orchestrator`. The orchestrator stays deterministic Python (no LLM router in the UI layer).
+
+| Endpoint | Role |
+|----------|------|
+| `POST /api/requests` | Start an orchestrator run |
+| `GET /api/requests/{id}/events` | SSE log stream + final result |
+| `GET /api/server/status` | Process alive / pid |
+| `POST /api/server/{start\|stop\|restart}` | Process controls |
+| `GET /api/plugins` | Allowed sources + blocklist + loaded + jars |
 
 ## Layer flow
 
 ```mermaid
 flowchart TD
-  User[User CLI/GUI] --> CLI[cli/]
-  CLI --> ORCH[orchestrator/service.py]
+  UserWeb[User Web UI] --> API[api/]
+  UserCli[User CLI/GUI] --> CLI[cli/]
+  API --> ORCH[orchestrator/service.py]
+  CLI --> ORCH
   ORCH --> PM[agents/plugin_manager]
   ORCH --> VF[agents/verifier]
   PM --> REG1[tools/registry/plugin]
@@ -94,14 +112,18 @@ flowchart TD
 | FastMCP | Tools are in-process; add MCP wrapper later if OpenClaw/Cursor need the same tools |
 | LangGraph | Orchestrator is simple; add when retries/human-approval grow |
 | CrewAI / AutoGen | Would push LLM routing; we want plain-code orchestrator |
+| Next.js | Local admin tool; Vite SPA is enough until a marketing site is needed |
+| Electron | Prefer web first; optional Tauri shell later |
 
 ## Adding a new feature (cheat sheet)
 
 | Task | Where to edit |
 |------|---------------|
-| New plugin tool | `tools/registry/plugin.py` + `tools/stub/state.py` |
+| New plugin tool | `tools/registry/plugin.py` + `tools/stub/state.py` + `tools/plugins/` |
 | New verify check | `tools/registry/verifier.py` + stub implementation |
 | Change workflow | `orchestrator/service.py` |
 | Change agent behavior | `agents/plugin_manager.py` or `agents/verifier.py` |
 | New CLI flag | `cli/main.py` |
-| Config / allowlist | `config.py` |
+| New HTTP route | `api/app.py` |
+| Web UI page | `web/src/pages/` |
+| Config / plugin policy | `config.py` (`PLUGIN_BLOCKLIST`, `PLUGIN_ALLOWED_SOURCES`) |

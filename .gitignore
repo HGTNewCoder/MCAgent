@@ -182,8 +182,18 @@ cython_debug/
 adcs-minecraft.key
 adcs-minecraft.pub
 
+# Minecraft server runtime (Paper jar, world data, plugins)
+server/
+
 # Stub Minecraft server state (local mock)
 mock_server/
 
+# Local vetted plugin jars for real installs (not committed)
+plugin-cache/
+
 # Per-run agent output logs
 logs/
+
+# Web UI
+web/node_modules/
+web/dist/

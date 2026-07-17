@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 
-Action = Literal["install", "uninstall", "configure", "noop"]
+Action = Literal["install", "uninstall", "configure", "start", "stop", "restart", "noop"]
 RunMode = Literal["info", "change"]
 
 

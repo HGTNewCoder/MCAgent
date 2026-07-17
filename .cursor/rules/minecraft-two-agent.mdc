@@ -15,10 +15,15 @@ User request → **Orchestrator** (`src/mcserver/orchestrator/service.py`, plain
 
 - Orchestrator is deterministic Python — never introduce an LLM router.
 - Plugin Manager and Verifier keep **separate** system prompts, tools, and message histories.
-- Plugin installs must go through the allowlist (`mcserver.config.PLUGIN_ALLOWLIST`).
+- Plugin installs search Hangar/Modrinth/SpigotMC and download jars; blocklist-only guardrail in prototype (`config.PLUGIN_BLOCKLIST`).
 - Verifier has no write tools except `rollback_last_change`.
-- Tool bodies live under `src/mcserver/tools/` (stubs in `stub/` today).
+- Tool bodies live under `src/mcserver/tools/` (`stub/` orchestration, `plugins/` catalog, `process/` Java control).
 - Application code lives in `src/mcserver/` — not repo root.
+
+## Environment
+
+- Runtime config lives in **`.env`** (loaded by `config.py`). When adding or changing env vars, **update `.env`** — not `.env.example` — unless you are only documenting a new variable for future clones.
+- Never commit `.env` or copy secrets into `.env.example`.
 
 ## Contracts
 
