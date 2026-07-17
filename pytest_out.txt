@@ -1,0 +1,22 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\HGT\Documents\Github\minecraft-server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\HGT\Documents\Github\minecraft-server
+configfile: pyproject.toml
+plugins: anyio-4.14.1
+collecting ... collected 12 items
+
+tests/test_plugin_search.py::test_search_merges_sources PASSED           [  8%]
+tests/test_plugin_search.py::test_install_stub_mode_uses_install_key PASSED [ 16%]
+tests/test_plugin_search.py::test_install_blocklisted_rejected PASSED    [ 25%]
+tests/test_plugin_search.py::test_resolve_install_key_hangar PASSED      [ 33%]
+tests/test_plugin_search.py::test_spigot_premium_rejected PASSED         [ 41%]
+tests/test_install_cache.py::test_install_uses_stub_when_not_real PASSED [ 50%]
+tests/test_install_cache.py::test_install_downloads_in_real_mode PASSED  [ 58%]
+tests/test_install_cache.py::test_install_fails_on_bad_download PASSED   [ 66%]
+tests/test_orchestrator.py::test_info_mode_skips_verifier PASSED         [ 75%]
+tests/test_orchestrator.py::test_healthy_change_succeeds PASSED          [ 83%]
+tests/test_orchestrator.py::test_unhealthy_change_rolls_back PASSED      [ 91%]
+tests/test_orchestrator.py::test_unhealthy_without_backup_skips_rollback PASSED [100%]
+
+============================= 12 passed in 1.46s ==============================
